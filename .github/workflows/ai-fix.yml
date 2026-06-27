@@ -1,0 +1,77 @@
+name: AI Fix (DeepSeek + aider)
+
+# The "coding engine" for the SuperPlane software-factory loop.
+# SuperPlane (github.runWorkflow) dispatches this with an issue_number; this job reads the
+# issue, lets aider+DeepSeek edit the repo, opens a PR, and comments the link back on the issue.
+#
+# Prereqs (repo settings):
+#   - Secret AZURE_DEEPSEEK_KEY = your Azure AI Foundry key
+#   - Settings -> Actions -> General -> "Allow GitHub Actions to create and approve pull requests"
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Issue number to fix"
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install aider
+        run: pip install aider-chat
+
+      - name: Read the issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          N="${{ github.event.inputs.issue_number }}"
+          echo "ISSUE_N=$N" >> "$GITHUB_ENV"
+          echo "BRANCH=ai-fix/issue-${N}-${{ github.run_id }}" >> "$GITHUB_ENV"
+          gh issue view "$N" --json title,body \
+            -q '"Issue #'"$N"': " + .title + "\n\n" + (.body // "")' > /tmp/task.md
+          echo "----- task -----"; cat /tmp/task.md
+
+      - name: Run aider (Azure DeepSeek, OpenAI-compatible)
+        env:
+          OPENAI_API_BASE: https://aarthian-demo-resource.services.ai.azure.com/openai/v1
+          OPENAI_API_KEY: ${{ secrets.AZURE_DEEPSEEK_KEY }}
+        run: |
+          set -euo pipefail
+          git config user.name "deepseek-agent"
+          git config user.email "deepseek-agent@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          # aider reads the repo, makes the change, and auto-commits. || true so a partial
+          # run still proceeds to the PR step (which guards on whether commits exist).
+          aider --model openai/DeepSeek-V4-Pro --yes-always --no-stream --no-analytics \
+                --message "$(cat /tmp/task.md)" || true
+
+      - name: Open PR (or report no changes)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ -z "$(git log origin/main..HEAD --oneline)" ]; then
+            gh issue comment "$ISSUE_N" --body "🤖 DeepSeek ran but produced no code changes for this issue."
+            exit 0
+          fi
+          git push -u origin "$BRANCH"
+          URL=$(gh pr create --base main --head "$BRANCH" \
+            --title "AI fix for #${ISSUE_N}" \
+            --body "Automated by DeepSeek + aider. Fixes #${ISSUE_N}.")
+          gh issue comment "$ISSUE_N" --body "✅ Opened a PR: ${URL}"
