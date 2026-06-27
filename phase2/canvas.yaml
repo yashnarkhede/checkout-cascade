@@ -6,7 +6,7 @@
 #   - Option 2: use the built-in Agent (Build mode) with phase2/BUILD-IN-UI.md's prompt.
 #
 # Before it runs you must, in the UI:
-#   1. Create a Secret named "anthropic" with key "api_key" = your Anthropic API key.
+#   1. Create a Secret named "openai" with key "api_key" = your OpenAI API key.
 #   2. Replace REPLACE_CHECKOUT_URL / REPLACE_PAYMENT_URL with your Render hosts.
 #   3. Replace REPLACE_SLACK_WEBHOOK_URL with your Slack Incoming Webhook URL.
 #
@@ -67,25 +67,23 @@ spec:
       component: http
       configuration:
         method: POST
-        url: "https://api.anthropic.com/v1/messages"
+        url: "https://api.openai.com/v1/chat/completions"
         contentType: application/json
         authorization:
-          type: custom_header
-          headerName: x-api-key
-          value: { secret: anthropic, key: api_key }
-        headers:
-          - { name: anthropic-version, value: "2023-06-01" }
+          type: bearer
+          credential: { secret: openai, key: api_key }
         json:
-          model: claude-sonnet-4-6
+          model: gpt-4o
           max_tokens: 600
-          system: >-
-            You are an SRE incident commander. You are given two JSON /status payloads, one from
-            checkout-service and one from payment-service. checkout-service only knows that calls to
-            payment-service timed out; the TRUE root cause is in payment-service (e.g. a high
-            db_query_ms p95 from a slow database query). Write a crisp 3-4 sentence incident summary
-            that states the user-facing SYMPTOM and the REAL root cause, citing specific numbers
-            (error_rate, latency_ms.p95, db_query_ms.p95). End with a one-line recommended action.
           messages:
+            - role: system
+              content: >-
+                You are an SRE incident commander. You are given two JSON /status payloads, one from
+                checkout-service and one from payment-service. checkout-service only knows that calls to
+                payment-service timed out; the TRUE root cause is in payment-service (e.g. a high
+                db_query_ms p95 from a slow database query). Write a crisp 3-4 sentence incident summary
+                that states the user-facing SYMPTOM and the REAL root cause, citing specific numbers
+                (error_rate, latency_ms.p95, db_query_ms.p95). End with a one-line recommended action.
             - role: user
               content: >-
                 checkout-service /status: {{ $['Fetch Checkout Status'].data.body }}
@@ -105,7 +103,7 @@ spec:
         url: "REPLACE_SLACK_WEBHOOK_URL"
         contentType: application/json
         json:
-          text: ":rotating_light: *Incident detected by SuperPlane*\n{{ $['AI Root Cause'].data.body.content[0].text }}"
+          text: ":rotating_light: *Incident detected by SuperPlane*\n{{ $['AI Root Cause'].data.body.choices[0].message.content }}"
         timeoutSeconds: 10
       position: { x: 3120, y: 60 }
 
