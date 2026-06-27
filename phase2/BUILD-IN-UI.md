@@ -12,15 +12,13 @@ SuperPlane UI → Secrets → New:
 - Name: `openai`
 - Key: `api_key`  Value: *(your OpenAI API key)*
 
-(Optional) a `slack` secret if you don't want the webhook URL inline — otherwise paste the
-webhook directly into the Notify Slack node.
+That's the **only** secret needed. The incident summary is shown inside SuperPlane (no Slack).
 
 ## Step 2 — Build the canvas
 Open `golden-mission` → Canvas. Two ways:
 
 ### Option A — paste YAML (fastest if the editor has a code/YAML view)
-Edit `phase2/canvas.yaml`: replace `REPLACE_CHECKOUT_URL`, `REPLACE_PAYMENT_URL`,
-`REPLACE_SLACK_WEBHOOK_URL`. Paste it into the canvas YAML view. Save / Publish.
+`phase2/canvas.yaml` already has your URLs filled in. Paste it into the canvas YAML view. Save / Publish.
 
 ### Option B — built-in Agent (Build mode)
 Open the Agent on the app and paste this:
@@ -39,8 +37,8 @@ Build a canvas with 6 nodes wired in a line:
        {"role":"system","content":"You are an SRE incident commander. Given checkout-service and payment-service /status JSON, the checkout side only sees timeouts but the real cause is payment-service's slow DB (high db_query_ms p95). Write 3-4 sentences: symptom + real root cause with numbers + one recommended action."},
        {"role":"user","content":"checkout: {{ $['Fetch Checkout Status'].data.body }} payment: {{ $['Fetch Payment Status'].data.body }}"}
      ] }
-6. "Notify Slack" — HTTP POST <SLACK_WEBHOOK_URL>, content-type application/json,
-   JSON body: { "text": ":rotating_light: Incident: {{ $['AI Root Cause'].data.body.choices[0].message.content }}" }
+6. "Incident Summary" — Display node, color red,
+   message: {{ $['AI Root Cause'].data.body.choices[0].message.content }}
 
 Edges: 1→2 (default), 2→3 (success), 3→4 (success), 4→5 (true channel), 5→6 (success).
 ```
@@ -52,11 +50,10 @@ Edges: 1→2 (default), 2→3 (success), 3→4 (success), 4→5 (true channel), 
 ## Step 4 — Demo
 1. Make sure phase-1 loadgen (or manual curls) is driving traffic.
 2. Inject the incident: `curl -X POST $PAY/admin/chaos/db_slowdown/6 -H "X-Chaos-Key: $KEY"`.
-3. Within ~1 min the schedule fires → checkout error_rate > 0.2 → Claude root-causes it →
-   Slack message names the DB as the real cause (despite checkout only reporting "timeout").
+3. Within ~1 min the schedule fires → checkout error_rate > 0.2 → the AI root-causes it →
+   the red "Incident Summary" display node in the SuperPlane UI shows the root cause —
+   naming the DB despite checkout only reporting "timeout". (Also in the run's node output.)
 4. For a faster demo, add a Manual Run (`start`) trigger to the first HTTP node so you can fire it on demand.
 
 ## Inputs still needed from you
-- Render public URLs: checkout + payment.
-- OpenAI API key (→ the `openai` secret).
-- Slack Incoming Webhook URL.
+- **OpenAI API key** → create the `openai` / `api_key` secret in the UI. (Render URLs are already filled into `canvas.yaml`.)
