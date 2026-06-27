@@ -4,7 +4,7 @@
 **Status:** Approved design (pre-implementation) — revised after a 4-agent verification pass (Render facts, Python/async facts, completeness review, demo red-team).
 **Scope:** Phase 1 only — build and deploy two faulty services + a load generator that produce believable, organic incident data on Render. Phase 2 (SuperPlane incident-AI pipeline) is out of scope and noted only where it shapes phase-1 outputs.
 
-> **One open decision for the reader (see §11.5):** whether the two HTTP hops use Render **internal** URLs (simple, auto-wired, but Render's HTTP dashboards may not graph private-network traffic) or **external** URLs (graphs definitely move, but breaks Blueprint auto-wiring). Everything else is resolved.
+> **All decisions resolved.** The two HTTP hops use Render **internal** URLs (Option A, §11.5): clean one-click Blueprint auto-wiring; the incident is shown via the rich `/status` JSON (the phase-2 evidence source) + Render CPU/memory graphs. Render HTTP latency/error graphs may not reflect private-network traffic, which is an accepted trade-off.
 
 ---
 
@@ -379,11 +379,10 @@ Append ~1 MB chunks (a few large `bytearray`s) per `/charge` while enabled, **ha
 ### 11.4 Single instance, single worker (in-memory state)
 All chaos + metrics state is per-process. `numInstances: 1` (no autoscaling) and `uvicorn --workers 1` are **required** on both web services. Scaling >1 instance/worker would split state across processes — a chaos POST would hit one process while loadgen/`/status` hit another, making toggles appear not to work and `/status` inconsistent, and would break the independence demo (§11.4). Any Render restart (deploy/OOM/platform) wipes state — avoid redeploys mid-demo.
 
-### 11.5 OPEN DECISION — internal vs external URLs (Render-graph visibility)
-Render's HTTP request/latency/error graphs are measured at the edge router; **private-network (internal) traffic likely bypasses it**, so with internal URLs the headline latency/error graphs may stay flat (CPU/memory still move; `/status` still fully reflects the incident).
-- **Option A (default in §6): internal URLs.** Blueprint auto-wires `fromService hostport`; simplest, no post-deploy edits. The incident is shown via `/status` (the primary evidence) + Render memory graph; Render HTTP graphs may not move.
-- **Option B: external URLs for the two HTTP hops** (`loadgen→checkout`, `checkout→payment`). Render HTTP graphs definitely move, but `fromService` can't supply the public URL, so the external `onrender.com` URLs must be hardcoded **after** first deploy (breaking one-click auto-wiring) and add public-hop latency/egress.
-**Recommendation:** ship Option A and treat `/status` as the demo's metric surface (it's richer than Render's graphs and already the phase-2 source); switch the two hops to Option B only if a moving Render HTTP latency/error graph is essential to the pitch. *Confirm before implementation.* (DB connection stays internal regardless.)
+### 11.5 DECISION (resolved) — internal URLs (Option A)
+**Chosen: Option A — internal URLs for both HTTP hops** (`loadgen→checkout`, `checkout→payment`), as wired in §6 via `fromService hostport`. The demo's metric surface is the rich `/status` JSON (richer than Render's graphs and already the phase-2 source), plus Render's CPU/memory graphs (memory clearly moves under `memory_leak`).
+
+Render's HTTP request/latency/error graphs are measured at the edge router and **likely do not reflect private-network (internal) traffic**, so those particular graphs may stay flat during an incident — an **accepted trade-off**, because `/status` fully captures the incident and Option B (external URLs) would forfeit one-click Blueprint auto-wiring (`fromService` can't supply a public URL) and add a public hop. The DB connection is internal regardless.
 
 ---
 
@@ -454,7 +453,7 @@ All §6 field names were verified against the current Render Blueprint spec (202
 - [x] Shared secret: `envVarGroups` + `generateValue: true` generates **one** value, shared identically via `- fromGroup`. (Per-service `generateValue` would differ — would break `X-Chaos-Key`.)
 - [x] `type: worker` requires a **paid** plan (`starter`); workers have no free tier.
 - [x] Starter web = **512 MB / 0.5 CPU** (informs the 250 MB hard memory cap). Health-check: success = 2xx/3xx within 5 s; ~15 s consecutive failures → stop routing; ~60 s → **restart** (validates §11.1).
-- [ ] §11.5 internal-vs-external URL / Render-HTTP-graph-visibility decision — **pending user confirmation** (does not block coding the services; only affects `render.yaml` URL wiring).
+- [x] §11.5 internal-vs-external URL decision — **RESOLVED: Option A (internal URLs)**; `render.yaml` already wired internal via `fromService hostport`.
 
 ---
 
