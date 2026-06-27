@@ -1,0 +1,108 @@
+# Phase 2 — Incident Commander canvas (DRAFT)
+#
+# This is a starting point. Per the superplane-app-builder process, the exact field
+# names/schemas MUST be confirmed against YOUR org via the CLI before applying:
+#   superplane index triggers --name schedule --output json
+#   superplane index actions  --name http     --output json
+#   superplane index actions  --name if       --output json
+# Then: superplane apps create --canvas-file phase2/canvas.draft.yaml   (or drafts + canvas update)
+#
+# Approach: ZERO typed integrations. Uses only Core components (schedule/http/if) +
+# two SECRETS, so setup is minimal:
+#   - anthropic_key      (Anthropic API key for the LLM call)
+#   - slack_webhook_url  (a Slack Incoming Webhook URL to post to)
+# Replace REPLACE_CHECKOUT_URL / REPLACE_PAYMENT_URL with your Render public hosts.
+
+apiVersion: v1
+kind: Canvas
+metadata:
+  name: incident-commander
+spec:
+  nodes:
+    - id: trigger-schedule
+      name: Every Minute
+      type: TYPE_TRIGGER
+      component: schedule
+      configuration:
+        type: minutes
+        minutesInterval: 1
+      position: { x: 120, y: 100 }
+
+    - id: fetch-checkout
+      name: Fetch Checkout Status
+      type: TYPE_ACTION
+      component: http
+      configuration:
+        method: GET
+        url: "https://REPLACE_CHECKOUT_URL/status"
+        timeoutSeconds: 10
+      position: { x: 720, y: 100 }
+
+    - id: fetch-payment
+      name: Fetch Payment Status
+      type: TYPE_ACTION
+      component: http
+      configuration:
+        method: GET
+        url: "https://REPLACE_PAYMENT_URL/status"
+        timeoutSeconds: 10
+      position: { x: 1320, y: 100 }
+
+    - id: incident-gate
+      name: Incident?
+      type: TYPE_ACTION
+      component: if
+      configuration:
+        # symptom: checkout error rate is high (it just sees timeouts)
+        expression: "$['Fetch Checkout Status'].data.body.error_rate > 0.2"
+      position: { x: 1920, y: 100 }
+
+    - id: ai-root-cause
+      name: AI Root Cause
+      type: TYPE_ACTION
+      component: http
+      configuration:
+        method: POST
+        url: "https://api.anthropic.com/v1/messages"
+        headers:
+          - { name: "x-api-key", value: "{{ secret('anthropic_key') }}" }
+          - { name: "anthropic-version", value: "2023-06-01" }
+          - { name: "content-type", value: "application/json" }
+        json:
+          model: "claude-sonnet-4-6"
+          max_tokens: 600
+          system: >-
+            You are an SRE incident commander. You receive two JSON /status payloads:
+            one from checkout-service, one from payment-service. checkout-service only
+            knows it timed out calling payment-service; the TRUE root cause is in
+            payment-service (e.g. high db_query_ms p95). Write a 3-4 sentence incident
+            summary stating BOTH the user-facing symptom AND the real root cause,
+            citing the specific numbers (error_rate, latency p95, db_query_ms p95).
+          messages:
+            - role: "user"
+              content: >-
+                checkout /status: {{ $['Fetch Checkout Status'].data.body }}
+
+                payment /status: {{ $['Fetch Payment Status'].data.body }}
+        timeoutSeconds: 30
+        successCodes: [200]
+      position: { x: 2520, y: 0 }
+
+    - id: notify-slack
+      name: Notify Slack
+      type: TYPE_ACTION
+      component: http
+      configuration:
+        method: POST
+        url: "{{ secret('slack_webhook_url') }}"
+        json:
+          text: ":rotating_light: *Incident detected by SuperPlane*\n{{ $['AI Root Cause'].data.body.content[0].text }}"
+        timeoutSeconds: 10
+      position: { x: 3120, y: 0 }
+
+  edges:
+    - { sourceId: trigger-schedule, targetId: fetch-checkout, channel: default }
+    - { sourceId: fetch-checkout,   targetId: fetch-payment,  channel: success }
+    - { sourceId: fetch-payment,    targetId: incident-gate,  channel: success }
+    - { sourceId: incident-gate,    targetId: ai-root-cause,  channel: "true" }
+    - { sourceId: ai-root-cause,    targetId: notify-slack,   channel: success }
