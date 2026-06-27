@@ -5,10 +5,15 @@
 # or use the Agent prompt in phase2/BUILD-IN-UI.md). No Slack / no external account:
 # the AI incident summary is shown IN the SuperPlane UI by the "Incident Summary" display node.
 #
-# Before it runs, in the UI create ONE secret:
-#   - name "azure_ai", key "api_key" = your Azure AI key (for the DeepSeek-V4-Pro deployment)
+# Before it runs, in the UI create an OpenAI integration pointed at your Azure Foundry endpoint:
+#   Integrations -> Add -> OpenAI
+#     - API key  = your Azure Foundry key (ROTATE the old one first; store as a secret)
+#     - Base URL = https://aarthian-demo-resource.services.ai.azure.com/openai/v1
+#   DeepSeek-V4-Pro then appears in the model dropdown. Put the integration id in the AI node below
+#   (`superplane integrations list`, or the integration's page in the UI).
 #
 # URLs are filled in:  payment = checkout-cascade.onrender.com, checkout = checkout-cascade-1.onrender.com
+# openai.textPrompt: config {model (integration-resource dropdown), input}; output at data.text; channel default.
 #
 # Verified schemas (via `superplane index ... --output json`):
 #   http: {method,url,authorization{type,credential=secret-key {secret,key}},headers[{name,value}],
@@ -62,35 +67,24 @@ spec:
     - id: ai-root-cause
       name: AI Root Cause
       type: TYPE_ACTION
-      component: http
+      component: openai.textPrompt
+      integration:
+        id: "REPLACE_OPENAI_INTEGRATION_ID"   # OpenAI integration (Azure baseURL); get id from `superplane integrations list` or the UI
       configuration:
-        method: POST
-        url: "https://aarthian-demo-resource.services.ai.azure.com/models/chat/completions?api-version=2024-05-01-preview"
-        contentType: application/json
-        authorization:
-          type: custom_header
-          headerName: api-key
-          value: { secret: azure_ai, key: api_key }
-        json:
-          model: DeepSeek-V4-Pro
-          max_tokens: 600
-          messages:
-            - role: system
-              content: >-
-                You are an SRE incident commander. You are given two JSON /status payloads, one from
-                checkout-service and one from payment-service. checkout-service only knows that calls to
-                payment-service timed out; the TRUE root cause is in payment-service (e.g. a high
-                db_query_ms p95 from a slow database query). Write a crisp 3-4 sentence incident summary
-                that states the user-facing SYMPTOM and the REAL root cause, citing specific numbers
-                (error_rate, latency_ms.p95, db_query_ms.p95). End with a one-line recommended action.
-            - role: user
-              content: >-
-                checkout-service /status: {{ $['Fetch Checkout Status'].data.body }}
+        model: DeepSeek-V4-Pro                # integration-resource dropdown — appears once the integration is connected
+        input: >-
+          You are an SRE incident commander. You are given two JSON /status payloads, one from
+          checkout-service and one from payment-service. checkout-service only knows that calls to
+          payment-service timed out; the TRUE root cause is in payment-service (e.g. a high
+          db_query_ms p95 from a slow database query). Write a crisp 3-4 sentence incident summary
+          that states the user-facing SYMPTOM and the REAL root cause, citing specific numbers
+          (error_rate, latency_ms.p95, db_query_ms.p95). End with a one-line recommended action.
 
 
-                payment-service /status: {{ $['Fetch Payment Status'].data.body }}
-        successCodes: "200"
-        timeoutSeconds: 60
+          checkout-service /status: {{ $['Fetch Checkout Status'].data.body }}
+
+
+          payment-service /status: {{ $['Fetch Payment Status'].data.body }}
       position: { x: 2520, y: 200 }
 
     - id: show-incident
@@ -99,7 +93,7 @@ spec:
       component: display
       configuration:
         color: red
-        message: "{{ $['AI Root Cause'].data.body.choices[0].message.content }}"
+        message: "{{ $['AI Root Cause'].data.text }}"
       position: { x: 3120, y: 200 }
 
   edges:
@@ -107,4 +101,4 @@ spec:
     - { sourceId: fetch-checkout,   targetId: fetch-payment,  channel: success }
     - { sourceId: fetch-payment,    targetId: incident-gate,  channel: success }
     - { sourceId: incident-gate,    targetId: ai-root-cause,  channel: "true" }
-    - { sourceId: ai-root-cause,    targetId: show-incident,  channel: success }
+    - { sourceId: ai-root-cause,    targetId: show-incident,  channel: default }
