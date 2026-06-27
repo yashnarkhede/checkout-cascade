@@ -33,7 +33,8 @@ class LoadGen:
 
 async def _main():
     import httpx
-    base = f"http://{os.environ['CHECKOUT_SERVICE_URL']}"
+    raw = os.environ["CHECKOUT_SERVICE_URL"]
+    base = raw.rstrip("/") if raw.startswith("http") else f"http://{raw}"
     rps = float(os.environ.get("LOADGEN_RPS", "2"))
     timeout = float(os.environ.get("LOADGEN_TIMEOUT_SECONDS", "20"))
     max_inflight = int(os.environ.get("LOADGEN_MAX_INFLIGHT", "50"))

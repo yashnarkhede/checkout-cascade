@@ -43,6 +43,9 @@ def _require_key(x_chaos_key):
 
 
 def _base_url():
+    # Accept either an internal host:port (prepend http://) or a full URL (e.g. public https://...onrender.com)
+    if PAYMENT_URL.startswith("http://") or PAYMENT_URL.startswith("https://"):
+        return PAYMENT_URL.rstrip("/")
     return f"http://{PAYMENT_URL}"
 
 
