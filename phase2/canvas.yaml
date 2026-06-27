@@ -1,0 +1,117 @@
+# Phase 2 — Incident Commander canvas (FINAL — schemas verified against techWizard org, CLI v0.26.0)
+#
+# Build target: the existing empty app "golden-mission" (id below). The org's CLI WRITE path
+# returns 500 ("undefined response type"), so apply this via the SuperPlane WEB UI:
+#   - Option 1: open golden-mission's canvas in the UI, switch to the YAML/code view, paste this.
+#   - Option 2: use the built-in Agent (Build mode) with phase2/BUILD-IN-UI.md's prompt.
+#
+# Before it runs you must, in the UI:
+#   1. Create a Secret named "anthropic" with key "api_key" = your Anthropic API key.
+#   2. Replace REPLACE_CHECKOUT_URL / REPLACE_PAYMENT_URL with your Render hosts.
+#   3. Replace REPLACE_SLACK_WEBHOOK_URL with your Slack Incoming Webhook URL.
+#
+# Verified schema facts (from `superplane index ... --output json`):
+#   http: configuration {method, url, authorization{type,credential,headerName,value(secret-key {secret,key})},
+#         headers[list of {name,value}], contentType, json(object), successCodes(string), timeoutSeconds(number)};
+#         output channels: success / failure; response available at data.body (PARSED JSON), data.status.
+#   if:   configuration {expression}; output channels: true / false.
+#   schedule (trigger): {type: minutes, minutesInterval: N}.
+
+apiVersion: v1
+kind: Canvas
+metadata:
+  id: 808eccf8-d68a-49f2-a484-095668addbe7   # golden-mission
+  name: golden-mission
+spec:
+  nodes:
+    - id: trigger-schedule
+      name: Every Minute
+      type: TYPE_TRIGGER
+      component: schedule
+      configuration:
+        type: minutes
+        minutesInterval: 1
+      position: { x: 120, y: 200 }
+
+    - id: fetch-checkout
+      name: Fetch Checkout Status
+      type: TYPE_ACTION
+      component: http
+      configuration:
+        method: GET
+        url: "https://REPLACE_CHECKOUT_URL/status"
+        timeoutSeconds: 10
+      position: { x: 720, y: 200 }
+
+    - id: fetch-payment
+      name: Fetch Payment Status
+      type: TYPE_ACTION
+      component: http
+      configuration:
+        method: GET
+        url: "https://REPLACE_PAYMENT_URL/status"
+        timeoutSeconds: 10
+      position: { x: 1320, y: 200 }
+
+    - id: incident-gate
+      name: Incident?
+      type: TYPE_ACTION
+      component: if
+      configuration:
+        expression: "$['Fetch Checkout Status'].data.body.error_rate > 0.2"
+      position: { x: 1920, y: 200 }
+
+    - id: ai-root-cause
+      name: AI Root Cause
+      type: TYPE_ACTION
+      component: http
+      configuration:
+        method: POST
+        url: "https://api.anthropic.com/v1/messages"
+        contentType: application/json
+        authorization:
+          type: custom_header
+          headerName: x-api-key
+          value: { secret: anthropic, key: api_key }
+        headers:
+          - { name: anthropic-version, value: "2023-06-01" }
+        json:
+          model: claude-sonnet-4-6
+          max_tokens: 600
+          system: >-
+            You are an SRE incident commander. You are given two JSON /status payloads, one from
+            checkout-service and one from payment-service. checkout-service only knows that calls to
+            payment-service timed out; the TRUE root cause is in payment-service (e.g. a high
+            db_query_ms p95 from a slow database query). Write a crisp 3-4 sentence incident summary
+            that states the user-facing SYMPTOM and the REAL root cause, citing specific numbers
+            (error_rate, latency_ms.p95, db_query_ms.p95). End with a one-line recommended action.
+          messages:
+            - role: user
+              content: >-
+                checkout-service /status: {{ $['Fetch Checkout Status'].data.body }}
+
+
+                payment-service /status: {{ $['Fetch Payment Status'].data.body }}
+        successCodes: "200"
+        timeoutSeconds: 30
+      position: { x: 2520, y: 60 }
+
+    - id: notify-slack
+      name: Notify Slack
+      type: TYPE_ACTION
+      component: http
+      configuration:
+        method: POST
+        url: "REPLACE_SLACK_WEBHOOK_URL"
+        contentType: application/json
+        json:
+          text: ":rotating_light: *Incident detected by SuperPlane*\n{{ $['AI Root Cause'].data.body.content[0].text }}"
+        timeoutSeconds: 10
+      position: { x: 3120, y: 60 }
+
+  edges:
+    - { sourceId: trigger-schedule, targetId: fetch-checkout, channel: default }
+    - { sourceId: fetch-checkout,   targetId: fetch-payment,  channel: success }
+    - { sourceId: fetch-payment,    targetId: incident-gate,  channel: success }
+    - { sourceId: incident-gate,    targetId: ai-root-cause,  channel: "true" }
+    - { sourceId: ai-root-cause,    targetId: notify-slack,   channel: success }
