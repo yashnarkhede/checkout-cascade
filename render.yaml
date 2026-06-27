@@ -1,0 +1,69 @@
+databases:
+  - name: checkout-cascade-db
+    plan: basic-256mb
+    databaseName: checkout_cascade
+    user: checkout_cascade
+
+envVarGroups:
+  - name: chaos-shared
+    envVars:
+      - key: CHAOS_ADMIN_KEY
+        generateValue: true
+
+services:
+  - type: web
+    name: payment-service
+    runtime: python
+    plan: starter
+    numInstances: 1
+    rootDir: payment-service
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /health
+    envVars:
+      - fromGroup: chaos-shared
+      - key: DATABASE_URL
+        fromDatabase:
+          name: checkout-cascade-db
+          property: connectionString
+      - { key: DB_POOL_MAX, value: "30" }
+      - { key: HEALTH_POOL_MAX, value: "2" }
+      - { key: DB_SLOWDOWN_MAX_SECONDS, value: "12" }
+      - { key: DB_STATEMENT_TIMEOUT_MS, value: "20000" }
+      - { key: MEMORY_LEAK_CAP_MB, value: "200" }
+
+  - type: web
+    name: checkout-service
+    runtime: python
+    plan: starter
+    numInstances: 1
+    rootDir: checkout-service
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /health
+    envVars:
+      - fromGroup: chaos-shared
+      - key: PAYMENT_SERVICE_URL
+        fromService:
+          name: payment-service
+          type: web
+          property: hostport
+      - { key: PAYMENT_TIMEOUT_SECONDS, value: "3" }
+      - { key: OWN_LATENCY_MAX_SECONDS, value: "10" }
+
+  - type: worker
+    name: loadgen
+    runtime: python
+    plan: starter
+    rootDir: loadgen
+    buildCommand: pip install -r requirements.txt
+    startCommand: python run.py
+    envVars:
+      - key: CHECKOUT_SERVICE_URL
+        fromService:
+          name: checkout-service
+          type: web
+          property: hostport
+      - { key: LOADGEN_RPS, value: "2" }
+      - { key: LOADGEN_TIMEOUT_SECONDS, value: "20" }
+      - { key: LOADGEN_MAX_INFLIGHT, value: "50" }
