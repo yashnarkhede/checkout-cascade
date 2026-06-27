@@ -9,8 +9,8 @@ Build into the existing app **golden-mission** (id `808eccf8-d68a-49f2-a484-0956
 
 ## Step 1 — Create the secret (UI)
 SuperPlane UI → Secrets → New:
-- Name: `openai`
-- Key: `api_key`  Value: *(your OpenAI API key)*
+- Name: `azure_ai`
+- Key: `api_key`  Value: *(your Azure AI key for the DeepSeek-V4-Pro deployment)*
 
 That's the **only** secret needed. The incident summary is shown inside SuperPlane (no Slack).
 
@@ -30,9 +30,9 @@ Build a canvas with 6 nodes wired in a line:
 2. "Fetch Checkout Status" — HTTP GET https://<CHECKOUT_URL>/status, timeout 10s.
 3. "Fetch Payment Status" — HTTP GET https://<PAYMENT_URL>/status, timeout 10s.
 4. "Incident?" — If, expression: $['Fetch Checkout Status'].data.body.error_rate > 0.2
-5. "AI Root Cause" — HTTP POST https://api.openai.com/v1/chat/completions, content-type application/json,
-   Authorization = Bearer token from secret openai/api_key,
-   JSON body: { "model": "gpt-4o", "max_tokens": 600,
+5. "AI Root Cause" — HTTP POST https://aarthian-demo-resource.services.ai.azure.com/models/chat/completions?api-version=2024-05-01-preview, content-type application/json,
+   Authorization = Custom Header "api-key" from secret azure_ai/api_key,
+   JSON body: { "model": "DeepSeek-V4-Pro", "max_tokens": 600,
      "messages": [
        {"role":"system","content":"You are an SRE incident commander. Given checkout-service and payment-service /status JSON, the checkout side only sees timeouts but the real cause is payment-service's slow DB (high db_query_ms p95). Write 3-4 sentences: symptom + real root cause with numbers + one recommended action."},
        {"role":"user","content":"checkout: {{ $['Fetch Checkout Status'].data.body }} payment: {{ $['Fetch Payment Status'].data.body }}"}
@@ -56,4 +56,4 @@ Edges: 1→2 (default), 2→3 (success), 3→4 (success), 4→5 (true channel), 
 4. For a faster demo, add a Manual Run (`start`) trigger to the first HTTP node so you can fire it on demand.
 
 ## Inputs still needed from you
-- **OpenAI API key** → create the `openai` / `api_key` secret in the UI. (Render URLs are already filled into `canvas.yaml`.)
+- **Azure AI key** → create the `azure_ai` / `api_key` secret in the UI. (Render URLs + Azure endpoint already filled into `canvas.yaml`.)

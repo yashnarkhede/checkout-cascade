@@ -6,7 +6,7 @@
 # the AI incident summary is shown IN the SuperPlane UI by the "Incident Summary" display node.
 #
 # Before it runs, in the UI create ONE secret:
-#   - name "openai", key "api_key" = your OpenAI API key
+#   - name "azure_ai", key "api_key" = your Azure AI key (for the DeepSeek-V4-Pro deployment)
 #
 # URLs are filled in:  payment = checkout-cascade.onrender.com, checkout = checkout-cascade-1.onrender.com
 #
@@ -65,13 +65,14 @@ spec:
       component: http
       configuration:
         method: POST
-        url: "https://api.openai.com/v1/chat/completions"
+        url: "https://aarthian-demo-resource.services.ai.azure.com/models/chat/completions?api-version=2024-05-01-preview"
         contentType: application/json
         authorization:
-          type: bearer
-          credential: { secret: openai, key: api_key }
+          type: custom_header
+          headerName: api-key
+          value: { secret: azure_ai, key: api_key }
         json:
-          model: gpt-4o
+          model: DeepSeek-V4-Pro
           max_tokens: 600
           messages:
             - role: system
@@ -89,7 +90,7 @@ spec:
 
                 payment-service /status: {{ $['Fetch Payment Status'].data.body }}
         successCodes: "200"
-        timeoutSeconds: 30
+        timeoutSeconds: 60
       position: { x: 2520, y: 200 }
 
     - id: show-incident
